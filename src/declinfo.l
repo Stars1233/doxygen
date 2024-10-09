@@ -106,6 +106,17 @@ ID	([$a-z_A-Z\x80-\xFF][$a-z_A-Z0-9\x80-\xFF]*)|(@[0-9]+)
   				  yyextra->name += yytext;
   				  BEGIN(Operator);
   				}
+<Start>{ID}({B}*"*")?{B}*"("{B}*"^"{B}*")"{B}*"(" { // Objective-C 2.0 block return type
+  				  if (!yyextra->insideObjC) 
+				  {
+				    REJECT;
+				  }
+				  else
+				  {
+  				    addType(yyscanner);
+				    yyextra->type += yytext;
+				  }
+                                }
 <Start>{ID}{B}*"("{B}*{ID}{B}*")" { // Objective-C class categories
   				  if (!yyextra->insideObjC) 
 				  {
@@ -357,7 +368,8 @@ void parseFuncDecl(const QCString &decl,const SrcLangExt lang,QCString &cl,QCStr
   cl=yyextra->scope;
   n=removeRedundantWhiteSpace(yyextra->name);
   int il=n.find('<'), ir=n.findRev('>');
-  if (il!=-1 && ir!=-1)
+  if (il!=-1 && ir!=-1 && n.at(il+1)!='=')
+    // prevent <=>
     // TODO: handle cases like where n="operator<< <T>" 
   {
     ftl=removeRedundantWhiteSpace(n.right(n.length()-il));

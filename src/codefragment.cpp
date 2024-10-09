@@ -288,7 +288,8 @@ void CodeFragmentManager::parseCodeFragment(OutputCodeList & codeOutList,
                                             const QCString & blockId,
                                             const QCString & scopeName,
                                             bool             showLineNumbers,
-                                            bool             trimLeft
+                                            bool             trimLeft,
+                                            bool             stripCodeComments
                                            )
 {
   AUTO_TRACE("CodeFragmentManager::parseCodeFragment({},blockId={},scopeName={},showLineNumber={},trimLeft={}",
@@ -334,6 +335,7 @@ void CodeFragmentManager::parseCodeFragment(OutputCodeList & codeOutList,
                       scopeName,
                       codeFragment->fileContents,
                       langExt,
+                      stripCodeComments, // actually not important here
                       false,
                       QCString()
                       );
@@ -345,6 +347,7 @@ void CodeFragmentManager::parseCodeFragment(OutputCodeList & codeOutList,
           scopeName,
           codeFragment->fileContents,
           langExt,            // lang
+          false,              // strip code comments (overruled before replaying)
           false,              // isExampleBlock
           QCString(),         // exampleName
           fd.get(),           // fileDef
@@ -363,6 +366,7 @@ void CodeFragmentManager::parseCodeFragment(OutputCodeList & codeOutList,
           scopeName,
           codeFragment->fileContentsTrimLeft,
           langExt,            // lang
+          false,              // strip code comments (overruled before replaying)
           false,              // isExampleBlock
           QCString(),         // exampleName
           fd.get(),           // fileDef
@@ -386,11 +390,15 @@ void CodeFragmentManager::parseCodeFragment(OutputCodeList & codeOutList,
     AUTO_TRACE_ADD("replay(start={},end={}) fileContentsTrimLeft.empty()={}",startLine,endLine,codeFragment->fileContentsTrimLeft.isEmpty());
     if (!trimLeft || codeFragment->fileContentsTrimLeft.isEmpty()) // replay the normal version
     {
-      codeFragment->recorderCodeList.get<OutputCodeRecorder>(OutputType::Recorder)->replay(codeOutList,startLine+1,endLine,showLineNumbers);
+      auto recorder = codeFragment->recorderCodeList.get<OutputCodeRecorder>(OutputType::Recorder);
+      recorder->stripCodeComments(stripCodeComments);
+      recorder->replay(codeOutList,startLine+1,endLine,showLineNumbers);
     }
     else // replay the trimmed version
     {
-      codeFragment->recorderCodeListTrimLeft.get<OutputCodeRecorder>(OutputType::Recorder)->replay(codeOutList,startLine+1,endLine,showLineNumbers);
+      auto recorder = codeFragment->recorderCodeListTrimLeft.get<OutputCodeRecorder>(OutputType::Recorder);
+      recorder->stripCodeComments(stripCodeComments);
+      recorder->replay(codeOutList,startLine+1,endLine,showLineNumbers);
     }
   }
   else

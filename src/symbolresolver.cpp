@@ -239,7 +239,7 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
     // split off the explicit scope part
     explicitScopePart=name.left(qualifierIndex);
     // todo: improve namespace alias substitution
-    replaceNamespaceAliases(explicitScopePart,explicitScopePart.length());
+    replaceNamespaceAliases(explicitScopePart);
     name=name.mid(qualifierIndex+2);
   }
 
@@ -400,7 +400,7 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
     // split off the explicit scope part
     explicitScopePart=name.left(qualifierIndex);
     // todo: improve namespace alias substitution
-    replaceNamespaceAliases(explicitScopePart,explicitScopePart.length());
+    replaceNamespaceAliases(explicitScopePart);
     name=name.mid(qualifierIndex+2);
   }
   AUTO_TRACE_ADD("qualifierIndex={} name={} explicitScopePart={}",qualifierIndex,name,explicitScopePart);
@@ -416,7 +416,7 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
   const auto &range  = (range1.empty() && (i=name.find('<'))!=-1) ? Doxygen::symbolMap->find(name.left(i)) : range1;
   if (range.empty())
   {
-    AUTO_TRACE_ADD("no symbols (including unspecialized)");
+    AUTO_TRACE_ADD("no symbols with name '{}' (including unspecialized)",name);
     return nullptr;
   }
   AUTO_TRACE_ADD("{} -> {} candidates",name,range.size());
@@ -791,7 +791,7 @@ void SymbolResolver::Private::getResolvedSymbol(
       const MemberDef *md = toMemberDef(d);
 
       bool match = true;
-      AUTO_TRACE_ADD("member={} args={}",md->name(),argListToString(md->argumentList()));
+      AUTO_TRACE_ADD("member={} args={} isCallable()={}",md->name(),argListToString(md->argumentList()),md->isCallable());
       if (md->isCallable() && !args.isEmpty())
       {
         QCString actArgs;
@@ -877,7 +877,7 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
     return nullptr; // typedef already done
   }
 
-  auto typedef_it = m_resolvedTypedefs.insert({qname.str(),md}).first; // put on the trace list
+  auto typedef_it = m_resolvedTypedefs.emplace(qname.str(),md).first; // put on the trace list
 
   const ClassDef *typeClass = md->getClassDef();
   QCString type = md->typeString(); // get the "value" of the typedef
@@ -1064,7 +1064,7 @@ int SymbolResolver::Private::isAccessibleFromWithExpScope(
       int i=-1;
       if (newScope->definitionType()==Definition::TypeNamespace)
       {
-        visitedNamespaces.insert({newScope->name().str(),newScope});
+        visitedNamespaces.emplace(newScope->name().str(),newScope);
         // this part deals with the case where item is a class
         // A::B::C but is explicit referenced as A::C, where B is imported
         // in A via a using directive.
@@ -1602,7 +1602,8 @@ const Definition *SymbolResolver::resolveSymbol(const Definition *scope,
   if (scope==nullptr) scope=Doxygen::globalScope;
   VisitedKeys visitedKeys;
   const Definition *result = p->getResolvedSymbolRec(visitedKeys,scope,name,args,checkCV,insideCode,&p->typeDef,&p->templateSpec,&p->resolvedType);
-  AUTO_TRACE_EXIT("result={}", qPrint(result?result->qualifiedName():QCString()));
+  AUTO_TRACE_EXIT("result={}{}", qPrint(result?result->qualifiedName():QCString()),
+                                 qPrint(result && result->definitionType()==Definition::TypeMember ? toMemberDef(result)->argsString() : QCString()));
   return result;
 }
 

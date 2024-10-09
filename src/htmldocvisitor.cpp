@@ -129,6 +129,7 @@ static bool mustBeOutsideParagraph(const DocNodeVariant &n)
                                  /* \dotfile */     DocDotFile,
                                  /* \mscfile */     DocMscFile,
                                  /* \diafile */     DocDiaFile,
+                                 /* \plantumlfile */ DocPlantUmlFile,
                                  /* <details> */    DocHtmlDetails,
                                  /* <summary> */    DocHtmlSummary,
                                                     DocIncOperator >(n))
@@ -268,7 +269,7 @@ static QCString htmlAttribsToString(const HtmlAttribList &attribs, QCString *pAl
     {
         // The open attribute is a boolean attribute.
         // Specifies that the details should be visible (open) to the user
-        // As it is a boolean attribute the initialisation value is of no interest
+        // As it is a boolean attribute the initialization value is of no interest
         result+=" ";
         result+=att.name;
         result+="=\"true\"";
@@ -583,15 +584,16 @@ void HtmlDocVisitor::operator()(const DocVerbatim &s)
                                         s.context(),
                                         s.text(),
                                         langExt,
+                                        Config_getBool(STRIP_CODE_COMMENTS),
                                         s.isExample(),
                                         s.exampleFile(),
-                                        nullptr,     // fileDef
-                                        -1,    // startLine
-                                        -1,    // endLine
-                                        FALSE, // inlineFragment
-                                        nullptr,     // memberDef
-                                        TRUE,  // show line numbers
-                                        m_ctx  // search context
+                                        nullptr, // fileDef
+                                        -1,      // startLine
+                                        -1,      // endLine
+                                        true,    // inlineFragment
+                                        nullptr, // memberDef
+                                        true,    // show line numbers
+                                        m_ctx    // search context
                                        );
       m_ci.endCodeFragment("DoxyCode");
       forceStartParagraph(s);
@@ -705,7 +707,7 @@ void HtmlDocVisitor::operator()(const DocVerbatim &s)
         }
         QCString baseName = PlantumlManager::instance().writePlantUMLSource(
                                     htmlOutput,s.exampleFile(),
-                                    s.text(),format,s.engine(),s.srcFile(),s.srcLine());
+                                    s.text(),format,s.engine(),s.srcFile(),s.srcLine(),true);
         m_t << "<div class=\"plantumlgraph\">\n";
         writePlantUMLFile(baseName,s.relPath(),s.context(),s.srcFile(),s.srcLine());
         visitCaption(m_t, s);
@@ -735,6 +737,7 @@ void HtmlDocVisitor::operator()(const DocInclude &inc)
                                         inc.context(),
                                         inc.text(),
                                         langExt,
+                                        inc.stripCodeComments(),
                                         inc.isExample(),
                                         inc.exampleFile(),
                                         nullptr,     // fileDef
@@ -758,15 +761,16 @@ void HtmlDocVisitor::operator()(const DocInclude &inc)
                                            inc.context(),
                                            inc.text(),
                                            langExt,
+                                           inc.stripCodeComments(),
                                            inc.isExample(),
                                            inc.exampleFile(),
                                            fd.get(),   // fileDef,
-                                           -1,    // start line
-                                           -1,    // end line
-                                           FALSE, // inline fragment
-                                           nullptr,     // memberDef
-                                           TRUE,  // show line numbers
-                                           m_ctx  // search context
+                                           -1,         // start line
+                                           -1,         // end line
+                                           true,       // inline fragment
+                                           nullptr,    // memberDef
+                                           true,       // show line numbers
+                                           m_ctx       // search context
                                            );
          m_ci.endCodeFragment("DoxyCode");
          forceStartParagraph(inc);
@@ -795,7 +799,6 @@ void HtmlDocVisitor::operator()(const DocInclude &inc)
       forceStartParagraph(inc);
       break;
     case DocInclude::Snippet:
-    case DocInclude::SnippetTrimLeft:
     case DocInclude::SnippetWithLines:
       forceEndParagraph(inc);
       m_ci.startCodeFragment("DoxyCode");
@@ -804,7 +807,8 @@ void HtmlDocVisitor::operator()(const DocInclude &inc)
                                        inc.blockId(),
                                        inc.context(),
                                        inc.type()==DocInclude::SnippetWithLines,
-                                       inc.type()==DocInclude::SnippetTrimLeft
+                                       inc.trimLeft(),
+                                       inc.stripCodeComments()
                                       );
       m_ci.endCodeFragment("DoxyCode");
       forceStartParagraph(inc);
@@ -842,15 +846,16 @@ void HtmlDocVisitor::operator()(const DocIncOperator &op)
                                 op.context(),
                                 op.text(),
                                 langExt,
+                                op.stripCodeComments(),
                                 op.isExample(),
                                 op.exampleFile(),
                                 fd.get(),     // fileDef
                                 op.line(),    // startLine
-                                -1,    // endLine
-                                FALSE, // inline fragment
-                                nullptr,     // memberDef
+                                -1,           // endLine
+                                true,         // inline fragment
+                                nullptr,      // memberDef
                                 op.showLineNo(),  // show line numbers
-                                m_ctx  // search context
+                                m_ctx         // search context
                                );
     }
     pushHidden(m_hide);
@@ -1838,6 +1843,39 @@ void HtmlDocVisitor::operator()(const DocDiaFile &df)
   forceEndParagraph(df);
   m_t << "<div class=\"diagraph\">\n";
   writeDiaFile(df.file(),df.relPath(),df.context(),df.srcFile(),df.srcLine());
+  if (df.hasCaption())
+  {
+    m_t << "<div class=\"caption\">\n";
+  }
+  visitChildren(df);
+  if (df.hasCaption())
+  {
+    m_t << "</div>\n";
+  }
+  m_t << "</div>\n";
+  forceStartParagraph(df);
+}
+
+void HtmlDocVisitor::operator()(const DocPlantUmlFile &df)
+{
+  if (m_hide) return;
+  if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(HTML_OUTPUT)+"/"+stripPath(df.file()));
+  forceEndParagraph(df);
+  QCString htmlOutput = Config_getString(HTML_OUTPUT);
+  QCString imgExt = getDotImageExtension();
+  PlantumlManager::OutputFormat format = PlantumlManager::PUML_BITMAP;	// default : PUML_BITMAP
+  if (imgExt=="svg")
+  {
+    format = PlantumlManager::PUML_SVG;
+  }
+  std::string inBuf;
+  readInputFile(df.file(),inBuf);
+  QCString baseName = PlantumlManager::instance().writePlantUMLSource(
+                                    htmlOutput,QCString(),
+                                    inBuf.c_str(),format,QCString(),df.srcFile(),df.srcLine(),false);
+  baseName=makeBaseName(baseName);
+  m_t << "<div class=\"plantumlgraph\">\n";
+  writePlantUMLFile(baseName,df.relPath(),QCString(),df.srcFile(),df.srcLine());
   if (df.hasCaption())
   {
     m_t << "<div class=\"caption\">\n";

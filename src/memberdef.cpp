@@ -193,6 +193,7 @@ class MemberDefImpl : public DefinitionMixin<MemberDefMutable>
     bool isLinkableInProject() const override;
     bool isLinkable() const override;
     bool hasDocumentation() const override;
+    bool hasUserDocumentation() const override;
     bool isDeleted() const override;
     bool isBriefSectionVisible() const override;
     bool isDetailedSectionVisible(MemberListContainer container) const override;
@@ -805,6 +806,8 @@ class MemberDefAliasImpl : public DefinitionAliasMixin<MemberDef>
     { return getMdAlias()->isLinkable(); }
     bool hasDocumentation() const override
     { return getMdAlias()->hasDocumentation(); }
+    bool hasUserDocumentation() const override
+    { return getMdAlias()->hasUserDocumentation(); }
     bool isDeleted() const override
     { return getMdAlias()->isDeleted(); }
     bool isBriefSectionVisible() const override
@@ -1834,7 +1837,7 @@ void MemberDefImpl::_computeLinkableInProject()
   }
   const NamespaceDef *nspace = getNamespaceDef();
   const FileDef *fileDef = getFileDef();
-  if (!groupDef && nspace && m_related==Relationship::Member && !nspace->isLinkableInProject()
+  if (!groupDef && nspace /*&& m_related==Relationship::Member*/ && !nspace->isLinkableInProject()
       && (fileDef==nullptr || !fileDef->isLinkableInProject()))
   {
     AUTO_TRACE_ADD("in not linkable namespace");
@@ -1842,7 +1845,7 @@ void MemberDefImpl::_computeLinkableInProject()
     return;
   }
   if (!groupDef && !nspace &&
-      m_related==Relationship::Member && !classDef &&
+      /*m_related==Relationship::Member &&*/ !classDef &&
       fileDef && !fileDef->isLinkableInProject())
   {
     AUTO_TRACE_ADD("in not linkable file");
@@ -3226,7 +3229,7 @@ void MemberDefImpl::_writeEnumValues(OutputList &ol,const Definition *container,
 
         ol.startDescTableTitle();
         ol.startDoxyAnchor(cfname,cname,fmd->anchor(),fmd->name(),fmd->argsString());
-        ol.addLabel(cfname,anchor());
+        ol.addLabel(cfname,fmd->anchor());
         ol.docify(fmd->name());
         ol.disableAllBut(OutputType::Man);
         ol.writeString(" ");
@@ -3419,7 +3422,7 @@ void MemberDefImpl::_writeMultiLineInitializer(OutputList &ol,const QCString &sc
     intf->resetCodeParserState();
     auto &codeOL = ol.codeGenerators();
     codeOL.startCodeFragment("DoxyCode");
-    intf->parseCode(codeOL,scopeName,m_initializer,srcLangExt,FALSE,QCString(),getFileDef(),
+    intf->parseCode(codeOL,scopeName,m_initializer,srcLangExt,Config_getBool(STRIP_CODE_COMMENTS),FALSE,QCString(),getFileDef(),
                      -1,-1,TRUE,this,FALSE,this);
     codeOL.endCodeFragment("DoxyCode");
 }
@@ -3883,10 +3886,11 @@ void MemberDefImpl::writeDocumentation(const MemberList *ml,
   _writeCategoryRelation(ol);
   _writeExamples(ol);
   _writeTypeConstraints(ol);
-  writeSourceDef(ol,cname);
-  writeInlineCode(ol,cname);
-  if (hasReferencesRelation()) writeSourceRefs(ol,cname);
-  if (hasReferencedByRelation()) writeSourceReffedBy(ol,cname);
+  QCString scopeStr = getScopeString();
+  writeSourceDef(ol);
+  writeInlineCode(ol,scopeStr);
+  if (hasReferencesRelation()) writeSourceRefs(ol,scopeStr);
+  if (hasReferencedByRelation()) writeSourceReffedBy(ol,scopeStr);
   _writeCallGraph(ol);
   _writeCallerGraph(ol);
 
@@ -3951,7 +3955,7 @@ void MemberDefImpl::writeMemberDocSimple(OutputList &ol, const Definition *conta
   {
     ol.startInlineMemberType();
     ol.startDoxyAnchor(cfname,cname,memAnchor,doxyName,doxyArgs);
-    ol.addLabel(cfname,anchor());
+    ol.addLabel(cfname,memAnchor);
 
     QCString ts = fieldType();
 
@@ -4078,16 +4082,25 @@ void MemberDefImpl::warnIfUndocumented() const
   const Definition *d=nullptr;
   QCString t;
   if (cd)
-    t=cd->compoundTypeString(), d=cd;
+  {
+    t=cd->compoundTypeString();
+    d=cd;
+  }
   else if (nd)
   {
-    d=nd;
     t=nd->compoundTypeString();
+    d=nd;
   }
   else if (gd)
-    t="group", d=gd;
+  {
+    t="group";
+    d=gd;
+  }
   else
-    t="file", d=fd;
+  {
+    t="file";
+    d=fd;
+  }
   bool extractAll = Config_getBool(EXTRACT_ALL);
 
   //printf("%s:warnIfUndoc: hasUserDocs=%d isFriendClass=%d protection=%d isRef=%d isDel=%d\n",
@@ -4105,7 +4118,7 @@ void MemberDefImpl::warnIfUndocumented() const
     QCString sep = getLanguageSpecificSeparator(lang,TRUE);
     warn_undoc(getDefFileName(),getDefLine(),"Member %s%s (%s) of %s %s is not documented.",
          qPrint(name()),qPrint(argsString()),qPrint(memberTypeName()),qPrint(t),
-         qPrint(sep=="::"?d->name():substitute(d->name(),"::",sep)));
+         qPrint(substitute(d->name(),"::",sep)));
   }
   else if (!hasDetailedDescription())
   {
@@ -4305,7 +4318,8 @@ void MemberDefImpl::setMemberGroup(MemberGroup *grp)
 QCString MemberDefImpl::getScopeString() const
 {
   QCString result;
-  if (getClassDef()) result=getClassDef()->displayName();
+  if (isStrong()) result=name();
+  else if (getClassDef()) result=getClassDef()->displayName();
   else if (getNamespaceDef()) result=getNamespaceDef()->displayName();
   return result;
 }
@@ -4534,7 +4548,7 @@ const MemberList *MemberDefImpl::getSectionList(const Definition *container) con
 void MemberDefImpl::setSectionList(const Definition *container,const MemberList *sl)
 {
   //printf("MemberDefImpl::setSectionList(%s,%p) name=%s\n",qPrint(d->name()),sl,qPrint(name()));
-  m_sectionMap.insert(std::make_pair(container,sl));
+  m_sectionMap.emplace(container,sl);
 }
 
 Specifier MemberDefImpl::virtualness(int count) const
@@ -5477,7 +5491,8 @@ bool MemberDefImpl::isCallable() const
          isSignal() ||
          isConstructor() ||
          isDestructor() ||
-         isObjCMethod();
+         isObjCMethod() ||
+         isFriend();
 }
 
 ClassDef *MemberDefImpl::relatedAlso() const
@@ -6280,6 +6295,18 @@ QCString MemberDefImpl::documentation() const
   else
   {
     return DefinitionMixin::documentation();
+  }
+}
+
+bool MemberDefImpl::hasUserDocumentation() const
+{
+  if (m_templateMaster)
+  {
+    return m_templateMaster->hasUserDocumentation();
+  }
+  else
+  {
+    return DefinitionMixin::hasUserDocumentation();
   }
 }
 

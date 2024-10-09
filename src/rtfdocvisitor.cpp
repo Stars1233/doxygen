@@ -330,6 +330,7 @@ void RTFDocVisitor::operator()(const DocVerbatim &s)
       m_t << "\\par\n";
       m_t << rtf_Style_Reset << getStyle("CodeExample");
       getCodeParser(lang).parseCode(m_ci,s.context(),s.text(),langExt,
+                                    Config_getBool(STRIP_CODE_COMMENTS),
                                     s.isExample(),s.exampleFile());
       //m_t << "\\par\n";
       m_t << "}\n";
@@ -424,7 +425,7 @@ void RTFDocVisitor::operator()(const DocVerbatim &s)
         QCString rtfOutput = Config_getString(RTF_OUTPUT);
         QCString baseName = PlantumlManager::instance().writePlantUMLSource(
                        rtfOutput,s.exampleFile(),s.text(),PlantumlManager::PUML_BITMAP,
-                       s.engine(),s.srcFile(),s.srcLine());
+                       s.engine(),s.srcFile(),s.srcLine(),true);
 
         writePlantUMLFile(baseName, s.hasCaption());
         visitChildren(s);
@@ -474,6 +475,7 @@ void RTFDocVisitor::operator()(const DocInclude &inc)
          getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                            inc.text(),
                                            langExt,
+                                           inc.stripCodeComments(),
                                            inc.isExample(),
                                            inc.exampleFile(),
                                            fd.get(),   // fileDef,
@@ -492,7 +494,9 @@ void RTFDocVisitor::operator()(const DocInclude &inc)
       m_t << "\\par\n";
       m_t << rtf_Style_Reset << getStyle("CodeExample");
       getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
-                                        inc.text(),langExt,inc.isExample(),
+                                        inc.text(),langExt,
+                                        inc.stripCodeComments(),
+                                        inc.isExample(),
                                         inc.exampleFile(),
                                         nullptr,     // fileDef
                                         -1,    // startLine
@@ -524,7 +528,6 @@ void RTFDocVisitor::operator()(const DocInclude &inc)
       m_t << "}\n";
       break;
     case DocInclude::Snippet:
-    case DocInclude::SnippetTrimLeft:
     case DocInclude::SnippetWithLines:
       m_t << "{\n";
       if (!m_lastIsPara) m_t << "\\par\n";
@@ -534,7 +537,8 @@ void RTFDocVisitor::operator()(const DocInclude &inc)
                                          inc.blockId(),
                                          inc.context(),
                                          inc.type()==DocInclude::SnippetWithLines,
-                                         inc.type()==DocInclude::SnippetTrimLeft
+                                         inc.trimLeft(),
+                                         inc.stripCodeComments()
                                         );
       m_t << "}";
       break;
@@ -574,6 +578,7 @@ void RTFDocVisitor::operator()(const DocIncOperator &op)
       }
 
       getCodeParser(locLangExt).parseCode(m_ci,op.context(),op.text(),langExt,
+                                        op.stripCodeComments(),
                                         op.isExample(),op.exampleFile(),
                                         fd.get(),     // fileDef
                                         op.line(),    // startLine
@@ -1301,6 +1306,21 @@ void RTFDocVisitor::operator()(const DocDiaFile &df)
   DBG_RTF("{\\comment RTFDocVisitor::operator()(const DocDiaFile &)}\n");
   if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(RTF_OUTPUT)+"/"+stripPath(df.file()));
   writeDiaFile(df);
+  visitChildren(df);
+  includePicturePostRTF(true, df.hasCaption());
+}
+
+void RTFDocVisitor::operator()(const DocPlantUmlFile &df)
+{
+  DBG_RTF("{\\comment RTFDocVisitor::operator()(const DocPlantUmlFile &)}\n");
+  if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(RTF_OUTPUT)+"/"+stripPath(df.file()));
+  QCString rtfOutput = Config_getString(RTF_OUTPUT);
+  std::string inBuf;
+  readInputFile(df.file(),inBuf);
+  QCString baseName = PlantumlManager::instance().writePlantUMLSource(
+                       rtfOutput,QCString(),inBuf.c_str(),PlantumlManager::PUML_BITMAP,
+                       QCString(),df.srcFile(),df.srcLine(),false);
+  writePlantUMLFile(baseName, df.hasCaption());
   visitChildren(df);
   includePicturePostRTF(true, df.hasCaption());
 }

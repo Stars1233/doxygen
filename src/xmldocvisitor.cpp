@@ -318,6 +318,7 @@ void XmlDocVisitor::operator()(const DocVerbatim &s)
       else
           m_t << ">";
       getCodeParser(lang).parseCode(m_ci,s.context(),s.text(),langExt,
+                                    Config_getBool(STRIP_CODE_COMMENTS),
                                     s.isExample(),s.exampleFile());
       m_t << "</programlisting>";
       break;
@@ -409,6 +410,7 @@ void XmlDocVisitor::operator()(const DocInclude &inc)
          getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                            inc.text(),
                                            langExt,
+                                           inc.stripCodeComments(),
                                            inc.isExample(),
                                            inc.exampleFile(),
                                            fd.get(), // fileDef,
@@ -426,6 +428,7 @@ void XmlDocVisitor::operator()(const DocInclude &inc)
       getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                         inc.text(),
                                         langExt,
+                                        inc.stripCodeComments(),
                                         inc.isExample(),
                                         inc.exampleFile(),
                                         nullptr,     // fileDef
@@ -481,7 +484,6 @@ void XmlDocVisitor::operator()(const DocInclude &inc)
       m_t << "</verbatim>";
       break;
     case DocInclude::Snippet:
-    case DocInclude::SnippetTrimLeft:
     case DocInclude::SnippetWithLines:
       m_t << "<programlisting filename=\"" << inc.file() << "\">";
       CodeFragmentManager::instance().parseCodeFragment(m_ci,
@@ -489,7 +491,8 @@ void XmlDocVisitor::operator()(const DocInclude &inc)
                                        inc.blockId(),
                                        inc.context(),
                                        inc.type()==DocInclude::SnippetWithLines,
-                                       inc.type()==DocInclude::SnippetTrimLeft
+                                       inc.trimLeft(),
+                                       inc.stripCodeComments()
                                       );
       m_t << "</programlisting>";
       break;
@@ -525,7 +528,9 @@ void XmlDocVisitor::operator()(const DocIncOperator &op)
       }
 
       getCodeParser(locLangExt).parseCode(m_ci,op.context(),
-                                          op.text(),langExt,op.isExample(),
+                                          op.text(),langExt,
+                                          op.stripCodeComments(),
+                                          op.isExample(),
                                           op.exampleFile(),
                                           fd.get(),     // fileDef
                                           op.line(),    // startLine
@@ -977,6 +982,15 @@ void XmlDocVisitor::operator()(const DocDiaFile &df)
   visitPreStart(m_t, "diafile", FALSE, *this, df.children(), stripPath(df.file()), FALSE, DocImage::Html, df.width(), df.height());
   visitChildren(df);
   visitPostEnd(m_t, "diafile");
+}
+
+void XmlDocVisitor::operator()(const DocPlantUmlFile &df)
+{
+  if (m_hide) return;
+  copyFile(df.file(),Config_getString(XML_OUTPUT)+"/"+stripPath(df.file()));
+  visitPreStart(m_t, "plantumlfile", FALSE, *this, df.children(), stripPath(df.file()), FALSE, DocImage::Html, df.width(), df.height());
+  visitChildren(df);
+  visitPostEnd(m_t, "plantumlfile");
 }
 
 void XmlDocVisitor::operator()(const DocLink &lnk)

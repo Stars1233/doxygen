@@ -117,6 +117,9 @@ class ClassDef : public Definition
                         Singleton, //=Entry::CLASS_SEC
                       };
 
+    virtual std::unique_ptr<ClassDef> deepCopy(const QCString &name) const = 0;
+    virtual void moveTo(Definition *) = 0;
+
     //-----------------------------------------------------------------------------------
     // --- getters
     //-----------------------------------------------------------------------------------
@@ -329,6 +332,8 @@ class ClassDef : public Definition
 
     virtual bool containsOverload(const MemberDef *md) const = 0;
 
+    virtual bool isImplicitTemplateInstance() const = 0;
+
     //-----------------------------------------------------------------------------------
     // --- count members ----
     //-----------------------------------------------------------------------------------
@@ -402,6 +407,7 @@ class ClassDefMutable : public DefinitionMutable, public ClassDef
         // inheritance graph related members
     virtual CLASS_GRAPH_t hasInheritanceGraph() const = 0;
     virtual void overrideInheritanceGraph(CLASS_GRAPH_t e) = 0;
+    virtual void setImplicitTemplateInstance(bool b) = 0;
 
     // collaboration graph related members
     virtual bool hasCollaborationGraph() const = 0;
@@ -413,6 +419,7 @@ class ClassDefMutable : public DefinitionMutable, public ClassDef
 
     virtual void insertBaseClass(ClassDef *,const QCString &name,Protection p,Specifier s,const QCString &t=QCString()) = 0;
     virtual void insertSubClass(ClassDef *,Protection p,Specifier s,const QCString &t=QCString()) = 0;
+    virtual void insertExplicitTemplateInstance(ClassDef *instance,const QCString &spec) = 0;
     virtual void insertMember(MemberDef *) = 0;
     virtual void insertUsedFile(const FileDef *) = 0;
     virtual void addMembersToTemplateInstance(const ClassDef *cd,const ArgumentList &templateArguments,const QCString &templSpec) = 0;

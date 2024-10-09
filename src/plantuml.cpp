@@ -26,7 +26,7 @@
 
 QCString PlantumlManager::writePlantUMLSource(const QCString &outDirArg,const QCString &fileName,
                                               const QCString &content,OutputFormat format, const QCString &engine,
-                                              const QCString &srcFile,int srcLine)
+                                              const QCString &srcFile,int srcLine,bool inlineCode)
 {
   QCString baseName;
   QCString puName;
@@ -75,7 +75,8 @@ QCString PlantumlManager::writePlantUMLSource(const QCString &outDirArg,const QC
   Debug::print(Debug::Plantuml,0,"*** %s puName: %s\n","writePlantUMLSource",qPrint(puName));
   Debug::print(Debug::Plantuml,0,"*** %s imgName: %s\n","writePlantUMLSource",qPrint(imgName));
 
-  QCString text = "@start"+engine+" "+imgName+"\n";
+  QCString text;
+  if (inlineCode) text = "@start"+engine+" "+imgName+"\n";
   text.reserve(text.length()+content.length()+100); // add room for image name and end marker
   const char *p = content.data();
   if (p)
@@ -109,11 +110,11 @@ QCString PlantumlManager::writePlantUMLSource(const QCString &outDirArg,const QC
     }
     text+='\n';
   }
-  text+="@end"+engine+"\n";
+  if (inlineCode) text +="@end"+engine+"\n";
 
   //printf("content\n====\n%s\n=====\n->\n-----\n%s\n------\n",qPrint(content),qPrint(text));
 
-  QCString qcOutDir(outDir);
+  QCString qcOutDir(substitute(outDir,"\\","/"));
   uint32_t pos = qcOutDir.findRev("/");
   QCString generateType(qcOutDir.right(qcOutDir.length() - (pos + 1)) );
   Debug::print(Debug::Plantuml,0,"*** %s generateType: %s\n","writePlantUMLSource",qPrint(generateType));
@@ -351,7 +352,7 @@ static void addPlantumlFiles(PlantumlManager::FilesMap &plantumlFiles,
   auto kv = plantumlFiles.find(key);
   if (kv==plantumlFiles.end())
   {
-    kv = plantumlFiles.insert(std::make_pair(key,StringVector())).first;
+    kv = plantumlFiles.emplace(key,StringVector()).first;
   }
   kv->second.push_back(value);
 }
@@ -363,7 +364,7 @@ static void addPlantumlContent(PlantumlManager::ContentMap &plantumlContent,
   auto kv = plantumlContent.find(key);
   if (kv==plantumlContent.end())
   {
-    kv = plantumlContent.insert(std::make_pair(key,PlantumlContent("",outDir,srcFile,srcLine))).first;
+    kv = plantumlContent.emplace(key,PlantumlContent("",outDir,srcFile,srcLine)).first;
   }
   kv->second.content+=puContent;
 }

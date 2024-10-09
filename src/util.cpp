@@ -388,6 +388,7 @@ QCString resolveTypeDef(const Definition *context,const QCString &qualifiedName,
   QCString result;
   if (qualifiedName.isEmpty())
   {
+    AUTO_TRACE_EXIT("empty name");
     return result;
   }
 
@@ -1689,7 +1690,14 @@ static QCString getCanonicalTypeForIdentifier(
         type.stripPrefix("typename ");
         type = stripTemplateSpecifiersFromScope(type,FALSE);
       }
-      result = getCanonicalTypeForIdentifier(d,fs,type,mType->getLanguage(),tSpec,count+1);
+      if (!type.isEmpty()) // see issue #11065
+      {
+        result = getCanonicalTypeForIdentifier(d,fs,type,mType->getLanguage(),tSpec,count+1);
+      }
+      else
+      {
+        result = word;
+      }
     }
     else
     {
@@ -2876,6 +2884,7 @@ bool resolveRef(/* in */  const QCString &scName,
     bool checkScope
     )
 {
+  AUTO_TRACE("scope={} name={} inSeeBlock={}",scName,name,inSeeBlock);
   //printf("resolveRef(scope=%s,name=%s,inSeeBlock=%d)\n",qPrint(scName),qPrint(name),inSeeBlock);
   QCString tsName = name;
   //bool memberScopeFirst = tsName.find('#')!=-1;
@@ -2897,6 +2906,7 @@ bool resolveRef(/* in */  const QCString &scName,
                         tsName.startsWith("::") ||    // ::foo in local scope
                         scName==nullptr                     // #foo  in global scope
                        );
+  bool allowTypeOnly=false;
 
   // default result values
   *resContext=nullptr;
@@ -2904,16 +2914,17 @@ bool resolveRef(/* in */  const QCString &scName,
 
   if (bracePos==-1) // simple name
   {
-    ClassDef *cd=nullptr;
-    NamespaceDef *nd=nullptr;
-    ConceptDef *cnd=nullptr;
-
     // the following if() was commented out for releases in the range
     // 1.5.2 to 1.6.1, but has been restored as a result of bug report 594787.
     if (!inSeeBlock && scopePos==-1 && isLowerCase(tsName))
     { // link to lower case only name => do not try to autolink
+      AUTO_TRACE_ADD("false");
       return FALSE;
     }
+
+    ClassDef *cd=nullptr;
+    NamespaceDef *nd=nullptr;
+    ConceptDef *cnd=nullptr;
 
     //printf("scName=%s fullName=%s\n",qPrint(scName),qPrint(fullName));
 
@@ -2934,6 +2945,7 @@ bool resolveRef(/* in */  const QCString &scName,
         ASSERT(nd!=nullptr);
         *resContext = nd;
       }
+      AUTO_TRACE_ADD("true");
       return TRUE;
     }
     else if (scName==fullName || (!inSeeBlock && scopePos==-1))
@@ -2942,8 +2954,14 @@ bool resolveRef(/* in */  const QCString &scName,
       //printf("found scName=%s fullName=%s scName==fullName=%d "
       //    "inSeeBlock=%d scopePos=%d!\n",
       //    qPrint(scName),qPrint(fullName),scName==fullName,inSeeBlock,scopePos);
-      return FALSE;
+
+      // at this point we have a bare word that is not a class or namespace
+      // we should also allow typedefs or enums to be linked, but not for instance member
+      // functions, otherwise 'Foo' would always link to the 'Foo()' constructor instead of the
+      // 'Foo' class. So we use this flag as a filter.
+      allowTypeOnly=true;
     }
+
     // continue search...
   }
 
@@ -3006,10 +3024,24 @@ bool resolveRef(/* in */  const QCString &scName,
       //printf("not global member!\n");
       *resContext=nullptr;
       *resMember=nullptr;
+      AUTO_TRACE_ADD("false");
       return FALSE;
     }
     //printf("after getDefs md=%p cd=%p fd=%p nd=%p gd=%p\n",md,cd,fd,nd,gd);
-    if      (result.md) { *resMember=result.md; *resContext=result.md; }
+    if      (result.md) {
+      if (!allowTypeOnly || result.md->isTypedef() || result.md->isEnumerate())
+      {
+        *resMember=result.md;
+        *resContext=result.md;
+      }
+      else // md is not a type, but we explicitly expect one
+      {
+        *resContext=nullptr;
+        *resMember=nullptr;
+        AUTO_TRACE_ADD("false");
+        return FALSE;
+      }
+    }
     else if (result.cd) *resContext=result.cd;
     else if (result.nd) *resContext=result.nd;
     else if (result.fd) *resContext=result.fd;
@@ -3017,16 +3049,19 @@ bool resolveRef(/* in */  const QCString &scName,
     else         { *resContext=nullptr; *resMember=nullptr; return FALSE; }
     //printf("member=%s (md=%p) anchor=%s linkable()=%d context=%s\n",
     //    qPrint(md->name()), md, qPrint(md->anchor()), md->isLinkable(), qPrint((*resContext)->name()));
+    AUTO_TRACE_ADD("true");
     return TRUE;
   }
   else if (inSeeBlock && !nameStr.isEmpty() && (gd=Doxygen::groupLinkedMap->find(nameStr)))
   { // group link
     *resContext=gd;
+    AUTO_TRACE_ADD("true");
     return TRUE;
   }
   else if ((cnd=Doxygen::conceptLinkedMap->find(nameStr)))
   {
     *resContext=cnd;
+    AUTO_TRACE_ADD("true");
     return TRUE;
   }
   else if (tsName.find('.')!=-1) // maybe a link to a file
@@ -3036,24 +3071,29 @@ bool resolveRef(/* in */  const QCString &scName,
     if (fd && !ambig)
     {
       *resContext=fd;
+      AUTO_TRACE_ADD("true");
       return TRUE;
     }
   }
 
   if (tryUnspecializedVersion)
   {
-    return resolveRef(scName,name,inSeeBlock,resContext,resMember,FALSE,nullptr,checkScope);
+    bool b = resolveRef(scName,name,inSeeBlock,resContext,resMember,FALSE,nullptr,checkScope);
+    AUTO_TRACE_ADD("{}",b);
+    return b;
   }
   if (bracePos!=-1) // Try without parameters as well, could be a constructor invocation
   {
     *resContext=getClass(fullName.left(bracePos));
     if (*resContext)
     {
+      AUTO_TRACE_ADD("true");
       return TRUE;
     }
   }
   //printf("resolveRef: %s not found!\n",qPrint(name));
 
+  AUTO_TRACE_ADD("false");
   return FALSE;
 }
 
@@ -3833,7 +3873,7 @@ QCString convertNameToFile(const QCString &name,bool allowDots,bool allowUndersc
     else
     {
       num = g_usedNamesCount;
-      g_usedNames.insert(std::make_pair(name.str(),g_usedNamesCount++));
+      g_usedNames.emplace(name.str(),g_usedNamesCount++);
     }
     result.sprintf("a%05d",num);
   }
@@ -3866,6 +3906,27 @@ QCString convertNameToFile(const QCString &name,bool allowDots,bool allowUndersc
     result.prepend(QCString().sprintf("d%x/d%02x/",l1Dir,l2Dir));
   }
   //printf("*** convertNameToFile(%s)->%s\n",qPrint(name),qPrint(result));
+  return result;
+}
+
+QCString generateAnonymousAnchor(const QCString &fileName,int count)
+{
+  QCString fn = stripFromPath(fileName)+":"+QCString().setNum(count);
+  const int sig_size=16;
+  uint8_t md5_sig[sig_size];
+  MD5Buffer(fn.data(),static_cast<unsigned int>(fn.length()),md5_sig);
+  char result[sig_size*3+2];
+  char *p = result;
+  *p++='@';
+  for (int i=0;i<sig_size;i++)
+  {
+    static const char oct[]="01234567";
+    uint8_t byte = md5_sig[i];
+    *p++=oct[(byte>>6)&7];
+    *p++=oct[(byte>>3)&7];
+    *p++=oct[(byte>>0)&7];
+  }
+  *p='\0';
   return result;
 }
 
@@ -5206,8 +5267,10 @@ QCString stripExtension(const QCString &fName)
   return stripExtensionGeneral(fName, Doxygen::htmlFileExtension);
 }
 
+#if 0
 void replaceNamespaceAliases(QCString &scope,size_t i)
 {
+  printf("replaceNamespaceAliases(%s,%zu)\n",qPrint(scope),i);
   while (i>0)
   {
     QCString ns = scope.left(i);
@@ -5222,7 +5285,9 @@ void replaceNamespaceAliases(QCString &scope,size_t i)
     }
     if (i>0 && ns==scope.left(i)) break;
   }
+  printf("result=%s\n",qPrint(scope));
 }
+#endif
 
 QCString stripPath(const QCString &s)
 {
@@ -5393,7 +5458,7 @@ bool updateLanguageMapping(const QCString &extension,const QCString &language)
     g_extLookup.erase(it2); // language was already register for this ext
   }
   //printf("registering extension %s\n",qPrint(extName));
-  g_extLookup.insert(std::make_pair(extName.str(),parserId));
+  g_extLookup.emplace(extName.str(),parserId);
   if (!Doxygen::parserManager->registerExtension(extName,it1->parserName))
   {
     err("Failed to assign extension %s to parser %s for language %s\n",
@@ -5558,7 +5623,7 @@ static MemberDef *getMemberFromSymbol(const Definition *scope,const FileDef *fil
   if (qualifierIndex!=-1)
   {
     explicitScopePart = name.left(qualifierIndex);
-    replaceNamespaceAliases(explicitScopePart,explicitScopePart.length());
+    replaceNamespaceAliases(explicitScopePart);
     name = name.mid(qualifierIndex+2);
   }
   //printf("explicitScopePart=%s\n",qPrint(explicitScopePart));

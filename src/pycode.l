@@ -105,6 +105,7 @@ struct pycodeYY_state
   bool          doubleQuote = FALSE;
   bool          noSuiteFound = FALSE;
   int           stringContext = 0;
+  bool          insideSpecialComment = false;
 
   std::stack<yy_size_t> indents;  //!< Tracks indentation levels for scoping in python
 
@@ -129,8 +130,8 @@ static void codify(yyscan_t yyscanner,const QCString &text);
 static void endCodeLine(yyscan_t yyscanner);
 static void nextCodeLine(yyscan_t yyscanner);
 static void writeMultiLineCodeLink(yyscan_t yyscanner, OutputCodeList &ol, const Definition *d, const QCString &text);
-static void startFontClass(yyscan_t yyscanner,const char *s);
-static void endFontClass(yyscan_t yyscanner);
+static void startFontClass(yyscan_t yyscanner,const char *s,bool specialComment=false);
+static void endFontClass(yyscan_t yyscanner,bool specialComment=false);
 static void codifyLines(yyscan_t yyscanner,const QCString &text);
 static bool getLinkInScope(yyscan_t yyscanner, const QCString &c, const QCString &m,
                            const QCString &memberText, OutputCodeList &ol, const QCString &text);
@@ -747,17 +748,9 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                     }
 <DocBlock>{NEWLINE}                 { // comment block ends at the end of this line
                                       // remove special comment (default config)
-                                      if (Config_getBool(STRIP_CODE_COMMENTS))
-                                      {
-                                        yyextra->yyLineNr+=((QCString)yyextra->docBlock).contains('\n');
-                                        yyextra->endComment=TRUE;
-                                      }
-                                      else // do not remove comment
-                                      {
-                                        startFontClass(yyscanner,"comment");
-                                        codifyLines(yyscanner,yyextra->docBlock);
-                                        endFontClass(yyscanner);
-                                      }
+                                      startFontClass(yyscanner,"comment",true);
+                                      codifyLines(yyscanner,yyextra->docBlock);
+                                      endFontClass(yyscanner,true);
                                       unput(*yytext);
                                       pop_state(yyscanner);
                                     }
@@ -811,11 +804,11 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                   }
 
 <*><<EOF>>                        {
-                                    if (YY_START==DocBlock && !Config_getBool(STRIP_CODE_COMMENTS))
+                                    if (YY_START==DocBlock)
                                     {
-                                      startFontClass(yyscanner,"comment");
+                                      startFontClass(yyscanner,"comment",true);
                                       codifyLines(yyscanner,yyextra->docBlock);
-                                      endFontClass(yyscanner);
+                                      endFontClass(yyscanner,true);
                                     }
                                     yyterminate();
                                   }
@@ -1183,12 +1176,16 @@ static void writeMultiLineCodeLink(yyscan_t yyscanner,
 
 //-------------------------------------------------------------------------------
 
-static void startFontClass(yyscan_t yyscanner,const char *s)
+static void startFontClass(yyscan_t yyscanner,const char *s,bool specialComment)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
+  if (specialComment)
+  {
+    yyextra->code->startSpecialComment();
+    yyextra->insideSpecialComment = true;
+  }
   // if font class is already set don't stop and start it.
-  // strcmp does not like null pointers as input.
-  if (!yyextra->currentFontClass || !s || strcmp(yyextra->currentFontClass,s))
+  if (qstrcmp(yyextra->currentFontClass,s)!=0)
   {
     endFontClass(yyscanner);
     yyextra->code->startFontClass(s);
@@ -1198,13 +1195,18 @@ static void startFontClass(yyscan_t yyscanner,const char *s)
 
 //-------------------------------------------------------------------------------
 
-static void endFontClass(yyscan_t yyscanner)
+static void endFontClass(yyscan_t yyscanner,bool specialComment)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   if (yyextra->currentFontClass)
   {
     yyextra->code->endFontClass();
     yyextra->currentFontClass=nullptr;
+  }
+  if (specialComment && yyextra->insideSpecialComment)
+  {
+    yyextra->code->endSpecialComment();
+    yyextra->insideSpecialComment=false;
   }
 }
 
@@ -1542,17 +1544,16 @@ static void findMemberLink(yyscan_t yyscanner,
   //    yyextra->currentDefinition?qPrint(yyextra->currentDefinition->name()):"<none>",
   //    yyextra->currentMemberDef?qPrint(yyextra->currentMemberDef->name()):"<none>"
   //    );
-  bool found = false;
   if (yyextra->currentDefinition)
   {
     const auto &v = Doxygen::symbolMap->find(symName);
     for (const auto &p : v)
     {
-      if (findMemberLink(yyscanner,ol,p,symName)) found = true;
+      if (findMemberLink(yyscanner,ol,p,symName)) return;
     }
   }
   //printf("sym %s not found\n",&yytext[5]);
-  if (!found) codify(yyscanner,symName);
+  codify(yyscanner,symName);
 }
 
 static void incrementFlowKeyWordCount(yyscan_t yyscanner)
@@ -1608,6 +1609,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
     const QCString &/* scopeName */,
     const QCString &input,
     SrcLangExt /*lang*/,
+    bool stripCodeComments,
     bool isExampleBlock,
     const QCString &exampleName,
     const FileDef *fileDef,
@@ -1625,6 +1627,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
 
   //printf("***parseCode(%s)\n",qPrint(input));
 
+  codeOutIntf.stripCodeComments(stripCodeComments);
   if (input.isEmpty()) return;
   DebugLex debugLex(Debug::Lex_pycode, __FILE__, fileDef ? qPrint(fileDef->fileName()): nullptr);
   yyextra->fileName      = fileDef ? fileDef->fileName():"";
@@ -1650,6 +1653,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
   yyextra->sourceFileDef = fileDef;
   yyextra->symbolResolver.setFileScope(fileDef);
   yyextra->foldStack.clear();
+  yyextra->insideSpecialComment = false;
 
   if (yyextra->exampleBlock && fileDef==nullptr)
   {

@@ -559,7 +559,6 @@ size_t Markdown::Private::isSpecialCommand(std::string_view data,size_t offset)
     { "dockbookinclude",endOfLine  },
     { "dontinclude",    endOfLine  },
     { "dotfile",        endOfLine  },
-    { "dotfile",        endOfLine  },
     { "e",              endOfLabel },
     { "elseif",         endOfGuard },
     { "em",             endOfLabel },
@@ -582,7 +581,6 @@ size_t Markdown::Private::isSpecialCommand(std::string_view data,size_t offset)
     { "includedoc",     endOfLine  },
     { "includelineno",  endOfLine  },
     { "ingroup",        endOfLabel },
-    { "interface",      endOfLine  },
     { "interface",      endOfLine  },
     { "latexinclude",   endOfLine  },
     { "maninclude",     endOfLine  },
@@ -623,6 +621,7 @@ size_t Markdown::Private::isSpecialCommand(std::string_view data,size_t offset)
     { "throws",         endOfLabel },
     { "tparam",         endOfLabel },
     { "typedef",        endOfLine  },
+    { "plantumlfile",   endOfLine  },
     { "union",          endOfLine  },
     { "until",          endOfLine  },
     { "var",            endOfLine  },
@@ -916,9 +915,9 @@ int Markdown::Private::processNmdash(std::string_view data,size_t offset)
   }
   if (count>=2 && offset>=2 && qstrncmp(data.data()-2,"<!",2)==0)
   { AUTO_TRACE_EXIT("result={}",1-count); return 1-count; } // start HTML comment
-  if (count==2 && (data[2]=='>'))
+  if (count==2 && size > 2 && data[2]=='>')
   { return 0; } // end HTML comment
-  if (count==3 && (data[3]=='>'))
+  if (count==3 && size > 3 && data[3]=='>')
   { return 0; } // end HTML comment
   if (count==2 && (offset<8 || qstrncmp(data.data()-8,"operator",8)!=0)) // -- => ndash
   {
@@ -1775,6 +1774,7 @@ int Markdown::Private::isHeaderline(std::string_view data, bool allowAdjustLevel
   size_t i=0, c=0;
   const size_t size = data.size();
   while (i<size && data[i]==' ') i++;
+  if (i==size) return 0;
 
   // test of level 1 header
   if (data[i]=='=')
@@ -2977,7 +2977,7 @@ size_t Markdown::Private::findEndOfLine(std::string_view data,size_t offset)
           tolower(data[end+2])=='e' && (data[end+3]=='>' || data[end+3]==' ')) // <pre> tag
       {
         // skip part until including </pre>
-        end  = end + processHtmlTagWrite(data.substr(end-1),end-1,false) + 2;
+        end  = end + processHtmlTagWrite(data.substr(end-1),end-1,false);
         break;
       }
       else
@@ -3274,7 +3274,7 @@ QCString Markdown::Private::processBlocks(std::string_view data,const size_t ind
         // handle previous line
         if (isLinkRef(data.substr(pi,i-pi),id,link,title))
         {
-          linkRefs.insert({id.lower().str(),LinkRef(link,title)});
+          linkRefs.emplace(id.lower().str(),LinkRef(link,title));
         }
         else
         {
@@ -3337,7 +3337,7 @@ QCString Markdown::Private::processBlocks(std::string_view data,const size_t ind
       {
         //printf("found link ref: id='%s' link='%s' title='%s'\n",
         //       qPrint(id),qPrint(link),qPrint(title));
-        linkRefs.insert({id.lower().str(),LinkRef(link,title)});
+        linkRefs.emplace(id.lower().str(),LinkRef(link,title));
         i=ref+pi;
         end=i+1;
       }
@@ -3381,7 +3381,7 @@ QCString Markdown::Private::processBlocks(std::string_view data,const size_t ind
     {
       //printf("found link ref: id='%s' link='%s' title='%s'\n",
       //    qPrint(id),qPrint(link),qPrint(title));
-      linkRefs.insert({id.lower().str(),LinkRef(link,title)});
+      linkRefs.emplace(id.lower().str(),LinkRef(link,title));
     }
     else
     {
@@ -3635,7 +3635,7 @@ void MarkdownOutlineParser::parseInput(const QCString &fileName,
     case ExplicitPageResult::explicitPage:
       {
         // look for `@page label My Title\n` and capture `label` (match[1]) and ` My Title` (match[2])
-        static const reg::Ex re(R"([\\@]page\s+(\a[\w-]*)(\s*[^\n]*)\n)");
+        static const reg::Ex re(R"([ ]*[\\@]page\s+(\a[\w-]*)(\s*[^\n]*)\n)");
         reg::Match match;
         std::string s = docs.str();
         if (reg::search(s,match,re))

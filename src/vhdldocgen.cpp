@@ -344,7 +344,7 @@ const MemberDef* VhdlDocGen::findMemberDef(ClassDef* cd,const QCString& key,Memb
     QCString tkey=cd->symbolName()+"@"+md->name();
     if (g_varMap.find(tkey.str())==g_varMap.end())
     {
-      g_varMap.insert({tkey.str(),md});
+      g_varMap.emplace(tkey.str(),md);
     }
   }
   it=g_varMap.find(keyType.str());
@@ -376,7 +376,7 @@ void VhdlDocGen::findAllPackages( ClassDef *cdef)
         {
           cList.push_back(cd);
           VhdlDocGen::findAllPackages(cd);
-          g_packages.insert({cdef,cList});
+          g_packages.emplace(cdef,cList);
         }
       }
     }//for
@@ -1867,6 +1867,7 @@ void VhdlDocGen::writeSource(const MemberDef* mdef,OutputList& ol,const QCString
                        QCString(),       // scope
                        codeFragment,     // input
                        SrcLangExt::VHDL,  // lang
+                       Config_getBool(STRIP_CODE_COMMENTS),
                        FALSE,            // isExample
                        QCString(),       // exampleName
                        mdef->getFileDef(), // fileDef
@@ -1885,7 +1886,7 @@ void VhdlDocGen::writeSource(const MemberDef* mdef,OutputList& ol,const QCString
   MemberDefMutable *mdm = toMemberDefMutable(const_cast<MemberDef*>(mdef));
   if (mdm)
   {
-    mdm->writeSourceDef(ol,cname);
+    mdm->writeSourceDef(ol);
     if (mdef->hasReferencesRelation()) mdm->writeSourceRefs(ol,cname);
     if (mdef->hasReferencedByRelation()) mdm->writeSourceReffedBy(ol,cname);
   }
@@ -3009,7 +3010,7 @@ void  FlowChart::printUmlTree()
   QCString htmlOutDir = Config_getString(HTML_OUTPUT);
 
   QCString n=convertNameToFileName();
-  n=PlantumlManager::instance().writePlantUMLSource(htmlOutDir,n,qcs,PlantumlManager::PUML_SVG,"uml",n,1);
+  n=PlantumlManager::instance().writePlantUMLSource(htmlOutDir,n,qcs,PlantumlManager::PUML_SVG,"uml",n,1,true);
   PlantumlManager::instance().generatePlantUMLOutput(n,htmlOutDir,PlantumlManager::PUML_SVG);
 }
 
@@ -3148,7 +3149,7 @@ void FlowChart::writeShape(TextStream &t,const FlowChart &fl)
 
 #ifdef DEBUGFLOW
   QCString qq(getNodeName(fl.id));
-  g_keyMap.insert({qq.str(),fl.id});
+  g_keyMap.emplace(qq.str(),fl.id);
 #endif
 
   bool dec=(fl.type & DECLN);

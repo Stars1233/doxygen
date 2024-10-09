@@ -1191,12 +1191,14 @@ void FileDefImpl::writeSourceBody(OutputList &ol,[[maybe_unused]] ClangTUParser 
       intf->parseCode(devNullList,QCString(),
                        fileToString(absFilePath(),TRUE,TRUE),
                        getLanguage(),
+                       Config_getBool(STRIP_CODE_COMMENTS),
                        FALSE,QCString(),this
                       );
     }
     intf->parseCode(codeOL,QCString(),
         fileToString(absFilePath(),filterSourceFiles,TRUE),
         getLanguage(),      // lang
+        Config_getBool(STRIP_CODE_COMMENTS),
         FALSE,              // isExampleBlock
         QCString(),         // exampleName
         this,               // fileDef
@@ -1240,6 +1242,7 @@ void FileDefImpl::parseSource([[maybe_unused]] ClangTUParser *clangParser)
             devNullList,QCString(),
             fileToString(absFilePath(),filterSourceFiles,TRUE),
             getLanguage(),
+            Config_getBool(STRIP_CODE_COMMENTS),
             FALSE,QCString(),this
            );
   }
@@ -1378,7 +1381,7 @@ void FileDefImpl::removeMember(MemberDef *md)
       removeMemberFromList(MemberListType::DocEnumMembers(),md);
       break;
     case MemberType::EnumValue:    // enum values are shown inside their enums
-      break;  
+      break;
     case MemberType::Define:
       removeMemberFromList(MemberListType::DecDefineMembers(),md);
       removeMemberFromList(MemberListType::DocDefineMembers(),md);
@@ -1437,11 +1440,11 @@ const QCString &FileDefImpl::name() const
 
 void FileDefImpl::addSourceRef(int line,const Definition *d,const MemberDef *md)
 {
-  //printf("FileDefImpl::addSourceDef(%d,%p,%p)\n",line,d,md);
+  //printf("FileDefImpl::addSourceRef(%d,%s,%s)\n",line,qPrint(d?d->name():"nullptr"),qPrint(md?md->name():"nullptr"));
   if (d)
   {
-    m_srcDefMap.insert(std::make_pair(line,d));
-    if (md) m_srcMemberMap.insert(std::make_pair(line,md));
+    m_srcDefMap.emplace(line,d);
+    if (md) m_srcMemberMap.emplace(line,md);
     //printf("Adding member %s with anchor %s at line %d to file %s\n",
     //    md?qPrint(md->name()):"<none>",md?qPrint(md->anchor()):"<none>",line,qPrint(name()));
   }
@@ -1486,7 +1489,7 @@ void FileDefImpl::addIncludeDependency(const FileDef *fd,const QCString &incName
   if (!iName.isEmpty() && m_includeMap.find(iName.str())==m_includeMap.end())
   {
     m_includeList.emplace_back(fd,incName,kind);
-    m_includeMap.insert(std::make_pair(iName.str(),&m_includeList.back()));
+    m_includeMap.emplace(iName.str(),&m_includeList.back());
   }
 }
 
@@ -1545,7 +1548,7 @@ void FileDefImpl::addIncludedByDependency(const FileDef *fd,const QCString &incN
   if (!iName.isEmpty() && m_includedByMap.find(iName.str())==m_includedByMap.end())
   {
     m_includedByList.emplace_back(fd,incName,kind);
-    m_includedByMap.insert(std::make_pair(iName.str(),&m_includedByList.back()));
+    m_includedByMap.emplace(iName.str(),&m_includedByList.back());
   }
 }
 

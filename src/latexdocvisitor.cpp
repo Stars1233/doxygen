@@ -459,6 +459,7 @@ void LatexDocVisitor::operator()(const DocVerbatim &s)
       {
         m_ci.startCodeFragment("DoxyCode");
         getCodeParser(lang).parseCode(m_ci,s.context(),s.text(),langExt,
+                                      Config_getBool(STRIP_CODE_COMMENTS),
                                       s.isExample(),s.exampleFile());
         m_ci.endCodeFragment("DoxyCode");
       }
@@ -549,7 +550,7 @@ void LatexDocVisitor::operator()(const DocVerbatim &s)
         QCString baseName = PlantumlManager::instance().writePlantUMLSource(
                               latexOutput,s.exampleFile(),s.text(),
                               s.useBitmap() ? PlantumlManager::PUML_BITMAP : PlantumlManager::PUML_EPS,
-                              s.engine(),s.srcFile(),s.srcLine());
+                              s.engine(),s.srcFile(),s.srcLine(),true);
 
         writePlantUMLFile(baseName, s);
       }
@@ -582,6 +583,7 @@ void LatexDocVisitor::operator()(const DocInclude &inc)
         getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                                   inc.text(),
                                                   langExt,
+                                                  inc.stripCodeComments(),
                                                   inc.isExample(),
                                                   inc.exampleFile(),
                                                   fd.get(),    // fileDef,
@@ -598,7 +600,9 @@ void LatexDocVisitor::operator()(const DocInclude &inc)
       {
         m_ci.startCodeFragment("DoxyCodeInclude");
         getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
-                                                  inc.text(),langExt,inc.isExample(),
+                                                  inc.text(),langExt,
+                                                  inc.stripCodeComments(),
+                                                  inc.isExample(),
                                                   inc.exampleFile(),
                                                   nullptr,     // fileDef
                                                   -1,    // startLine
@@ -627,7 +631,6 @@ void LatexDocVisitor::operator()(const DocInclude &inc)
       m_t << "\\end{DoxyVerbInclude}\n";
       break;
     case DocInclude::Snippet:
-    case DocInclude::SnippetTrimLeft:
     case DocInclude::SnippetWithLines:
       {
         m_ci.startCodeFragment("DoxyCodeInclude");
@@ -636,7 +639,8 @@ void LatexDocVisitor::operator()(const DocInclude &inc)
                                          inc.blockId(),
                                          inc.context(),
                                          inc.type()==DocInclude::SnippetWithLines,
-                                         inc.type()==DocInclude::SnippetTrimLeft
+                                         inc.trimLeft(),
+                                         inc.stripCodeComments()
                                         );
         m_ci.endCodeFragment("DoxyCodeInclude");
       }
@@ -670,6 +674,7 @@ void LatexDocVisitor::operator()(const DocIncOperator &op)
       }
 
       getCodeParser(locLangExt).parseCode(m_ci,op.context(),op.text(),langExt,
+                                          op.stripCodeComments(),
                                           op.isExample(),op.exampleFile(),
                                           fd.get(),     // fileDef
                                           op.line(),    // startLine
@@ -1568,6 +1573,15 @@ void LatexDocVisitor::operator()(const DocDiaFile &df)
   endDiaFile(df.hasCaption());
 }
 
+void LatexDocVisitor::operator()(const DocPlantUmlFile &df)
+{
+  if (m_hide) return;
+  if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(LATEX_OUTPUT)+"/"+stripPath(df.file()));
+  startPlantUmlFile(df.file(),df.width(),df.height(),df.hasCaption(),df.srcFile(),df.srcLine());
+  visitChildren(df);
+  endPlantUmlFile(df.hasCaption());
+}
+
 void LatexDocVisitor::operator()(const DocLink &lnk)
 {
   if (m_hide) return;
@@ -2037,6 +2051,40 @@ void LatexDocVisitor::writePlantUMLFile(const QCString &baseName, const DocVerba
   visitPreStart(m_t, s.hasCaption(), shortName, s.width(), s.height());
   visitCaption(s.children());
   visitPostEnd(m_t, s.hasCaption());
+}
+
+void LatexDocVisitor::startPlantUmlFile(const QCString &fileName,
+                                   const QCString &width,
+                                   const QCString &height,
+                                   bool hasCaption,
+                                   const QCString &srcFile,
+                                   int srcLine
+                                  )
+{
+  QCString outDir = Config_getString(LATEX_OUTPUT);
+  std::string inBuf;
+  readInputFile(fileName,inBuf);
+
+  bool useBitmap = inBuf.find("@startditaa") != std::string::npos;
+  QCString baseName = PlantumlManager::instance().writePlantUMLSource(
+                              outDir,QCString(),inBuf.c_str(),
+                              useBitmap ? PlantumlManager::PUML_BITMAP : PlantumlManager::PUML_EPS,
+                              QCString(),srcFile,srcLine,false);
+  baseName=makeBaseName(baseName);
+  QCString shortName = makeShortName(baseName);
+  if (useBitmap)
+  {
+    if (shortName.find('.')==-1) shortName += ".png";
+  }
+  PlantumlManager::instance().generatePlantUMLOutput(baseName,outDir,
+                              useBitmap ? PlantumlManager::PUML_BITMAP : PlantumlManager::PUML_EPS);
+  visitPreStart(m_t,hasCaption, shortName, width, height);
+}
+
+void LatexDocVisitor::endPlantUmlFile(bool hasCaption)
+{
+  if (m_hide) return;
+  visitPostEnd(m_t,hasCaption);
 }
 
 int LatexDocVisitor::indentLevel() const

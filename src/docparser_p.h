@@ -33,6 +33,7 @@
 #include "doctokenizer.h"
 #include "searchindex.h"
 #include "construct.h"
+#include "cmdmapper.h"
 
 using DefinitionStack = std::vector<const Definition *>;
 using DocNodeStack = std::stack<DocNodeVariant *>;
@@ -86,6 +87,7 @@ struct DocParserContext
   size_t       includeFileLength = 0;
   int          includeFileLine;
   bool         includeFileShowLineNo = false;
+  bool         stripCodeComments = true;
 
   TokenInfo *token = nullptr;
   int      lineNo = 0;
@@ -114,7 +116,7 @@ class DocParser : public IDocParser
                             handleWord=TRUE);
     void errorHandleDefaultToken(DocNodeVariant *parent,Token tok,
                                  DocNodeList &children,const QCString &txt);
-    void defaultHandleTitleAndSize(const int cmd, DocNodeVariant *parent,
+    void defaultHandleTitleAndSize(const CommandType cmd, DocNodeVariant *parent,
                                    DocNodeList &children, QCString &width,QCString &height);
     Token handleStyleArgument(DocNodeVariant *parent,DocNodeList &children,
                                const QCString &cmdName);

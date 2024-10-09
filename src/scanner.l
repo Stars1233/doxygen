@@ -33,7 +33,6 @@ typedef yyguts_t *yyscan_t;
 #include <algorithm>
 #include <vector>
 #include <utility>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -60,9 +59,6 @@ typedef yyguts_t *yyscan_t;
 
 #define YY_NO_INPUT 1
 #define YY_NO_UNISTD_H 1
-
-static AtomicInt  anonCount;
-static AtomicInt  anonNSCount;
 
 struct scannerYY_state
 {
@@ -213,6 +209,9 @@ struct scannerYY_state
 
   int              fakeNS  = 0; //<! number of file scoped namespaces in CSharp file
   TextStream       dummyTextStream;
+
+  int              anonCount = 0;
+  int              anonNSCount = 0;
 };
 
 [[maybe_unused]] static const char *stateToString(int state);
@@ -226,6 +225,8 @@ static QCString stripFuncPtr(const QCString &type);
 static bool nameIsOperator(QCString &name);
 void fixArgumentListForJavaScript(ArgumentList &al);
 static bool startOfRequiresExpression(const QCString &req);
+static QCString extractBeginRawStringDelimiter(const char *str);
+static QCString extractEndRawStringDelimiter(const char *str);
 
 // forward declarations for statefull functions
 static void initParser(yyscan_t yyscanner);
@@ -246,6 +247,7 @@ static void setJavaProtection(yyscan_t yyscanner);
 static void storeClangId(yyscan_t yyscanner,const char *id);
 static void startVerbatimBlock(yyscan_t yyscanner,const QCString &blockName,size_t fencedSize=0);
 static bool endVerbatimBlock(yyscan_t yyscanner,const QCString &blockName,size_t fencedSize=0);
+
 
 /* ----------------------------------------------------------------- */
 #undef  YY_INPUT
@@ -794,6 +796,8 @@ NONLopt [^\n]*
                                             yyextra->current->section = EntryType::makeFunction();
                                             yyextra->language = yyextra->current->lang = SrcLangExt::ObjC;
                                             yyextra->insideObjC = TRUE;
+                                            yyextra->yyBegColNr  = yyextra->yyColNr;
+                                            yyextra->yyBegLineNr = yyextra->yyLineNr;
                                             yyextra->current->virt = Specifier::Virtual;
 
                                             yyextra->current->isStatic=yytext[0]=='+';
@@ -803,11 +807,13 @@ NONLopt [^\n]*
                                         }
 <ObjCMethod>"("                         { // start of method's return type
                                           BEGIN( ObjCReturnType );
+                                          yyextra->current->type.clear();
+                                          yyextra->roundCount=0;
                                         }
 <ObjCMethod>{ID}                        { // found method name
                                           if (yyextra->current->type.isEmpty())
                                           {
-                                            yyextra->current->type = "id";
+                                            yyextra->current->type += "id";
                                           }
                                           yyextra->current->name = yytext;
                                           storeClangId(yyscanner,yytext);
@@ -818,11 +824,27 @@ NONLopt [^\n]*
                                           yyextra->current->argList.push_back(a);
                                           BEGIN( ObjCParams );
                                         }
-<ObjCReturnType>[^)]*                   { // TODO: check if nested branches are possible.
-                                          yyextra->current->type = yytext;
+<ObjCReturnType>[^()]*                  {
+                                          yyextra->current->type += yytext;
+                                        }
+<ObjCReturnType>"(^)("                  { // Block return type
+                                          yyextra->current->type += yytext;
+                                          yyextra->roundCount++;
+                                        }
+<ObjCReturnType>"("                     {
+                                          yyextra->current->type += yytext;
+                                          yyextra->roundCount++;
                                         }
 <ObjCReturnType>")"                     {
-                                          BEGIN( ObjCMethod );
+                                          if (yyextra->roundCount<=0)
+                                          {
+                                            BEGIN( ObjCMethod );
+                                          }
+                                          else
+                                          {
+                                            yyextra->current->type += yytext;
+                                            yyextra->roundCount--;
+                                          }
                                         }
 <ObjCParams>({ID})?{BN}*":"             { // Keyword of parameter
                                           QCString keyw = yytext;
@@ -1879,9 +1901,15 @@ NONLopt [^\n]*
                                         }
 <NSAliasArg>({ID}"::")*{ID}             {
                                           //printf("Inserting namespace alias %s::%s->%s\n",qPrint(yyextra->current_root->name),qPrint(yyextra->aliasName),yytext);
-                                          // TODO: namespace aliases are now treated as global entities
-                                          // while they should be aware of the scope they are in
-                                          Doxygen::namespaceAliasMap.insert({yyextra->aliasName.str(),std::string(yytext)});
+                                          std::string ctx = yyextra->current_root->name.str();
+                                          if (ctx.empty())
+                                          {
+                                            Doxygen::namespaceAliasMap.emplace(yyextra->aliasName.str(),NamespaceAliasInfo(std::string(yytext),std::string()));
+                                          }
+                                          else
+                                          {
+                                            Doxygen::namespaceAliasMap.emplace(ctx+"::"+yyextra->aliasName.str(),NamespaceAliasInfo(std::string(yytext),ctx));
+                                          }
                                         }
 <NSAliasArg>";"                         {
                                           BEGIN( FindMembers );
@@ -1914,9 +1942,8 @@ NONLopt [^\n]*
                                           //printf("PHP: adding use as relation: %s->%s\n",yytext,qPrint(yyextra->aliasName));
                                           if (!yyextra->aliasName.isEmpty())
                                           {
-                                            Doxygen::namespaceAliasMap.insert({yytext,
-                                                 std::string(removeRedundantWhiteSpace(
-                                                   substitute(yyextra->aliasName,"\\","::")).str())});
+                                            std::string aliasValue = removeRedundantWhiteSpace(substitute(yyextra->aliasName,"\\","::")).str();
+                                            Doxygen::namespaceAliasMap.emplace(yytext,NamespaceAliasInfo(aliasValue));
                                           }
                                           yyextra->aliasName.clear();
                                         }
@@ -1963,7 +1990,7 @@ NONLopt [^\n]*
                                           initEntry(yyscanner);
                                           BEGIN(Using);
                                         }
-<FindMembers>"using"{BN}+               {
+<FindMembers>"using"{BN}+/("::"{ID}("::"{ID})*)? {
                                           if (yyextra->insideJava) REJECT;
                                           yyextra->current->startLine=yyextra->yyLineNr;
                                           yyextra->current->startColumn = yyextra->yyColNr;
@@ -1971,7 +1998,7 @@ NONLopt [^\n]*
                                           BEGIN(Using);
                                         }
 <Using>"namespace"{BN}+                 { lineCount(yyscanner); BEGIN(UsingDirective); }
-<Using>({ID}{BN}*("::"|"."){BN}*)*({ID}|{OPERATOR}) {
+<Using>("::")?({ID}{BN}*("::"|"."){BN}*)*({ID}|{OPERATOR}) {
                                           lineCount(yyscanner);
                                           yyextra->current->name=yytext;
                                           yyextra->current->fileName = yyextra->fileName;
@@ -2178,6 +2205,11 @@ NONLopt [^\n]*
                                           *yyextra->pCopyHereDocGString << yytext;
                                           BEGIN(CopyHereDocEnd);
                                         }
+<CopyHereDoc>"\""{ID}/"\""              { // PHP quoted heredoc
+                                          yyextra->delimiter = &yytext[1];
+                                          *yyextra->pCopyHereDocGString << yytext;
+                                          BEGIN(CopyHereDocEnd);
+                                        }
 <CopyHereDoc>"'"{ID}/"'"                { // PHP nowdoc
                                           yyextra->delimiter = &yytext[1];
                                           *yyextra->pCopyHereDocGString << yytext;
@@ -2185,6 +2217,10 @@ NONLopt [^\n]*
                                         }
 <HereDoc>{ID}                           { // PHP heredoc
                                           yyextra->delimiter = yytext;
+                                          BEGIN(HereDocEnd);
+                                        }
+<HereDoc>"\""{ID}/"\""                  { // PHP quoted heredoc
+                                          yyextra->delimiter = &yytext[1];
                                           BEGIN(HereDocEnd);
                                         }
 <HereDoc>"'"{ID}/"'"                    { // PHP nowdoc
@@ -3063,11 +3099,8 @@ NONLopt [^\n]*
                                           }
                                           else
                                           {
-                                            QCString text=yytext;
-                                            yyextra->current->initializer << text;
-                                            int i=text.find('"');
-                                            yyextra->delimiter = yytext+i+1;
-                                            yyextra->delimiter=yyextra->delimiter.left(yyextra->delimiter.length()-1);
+                                            yyextra->current->initializer << yytext;
+                                            yyextra->delimiter = extractBeginRawStringDelimiter(yytext);
                                             yyextra->lastRawStringContext = YY_START;
                                             yyextra->pCopyRawGString = &yyextra->current->initializer;
                                             BEGIN(RawGString);
@@ -3075,12 +3108,14 @@ NONLopt [^\n]*
                                           }
                                         }
 <RawGString>{RAWEND}                    {
-                                          *yyextra->pCopyRawGString << yytext;
-                                          QCString delimiter = yytext+1;
-                                          delimiter=delimiter.left(delimiter.length()-1);
-                                          if (delimiter==yyextra->delimiter)
+                                          if (extractEndRawStringDelimiter(yytext)==yyextra->delimiter)
                                           {
+                                            *yyextra->pCopyRawGString << yytext;
                                             BEGIN(yyextra->lastRawStringContext);
+                                          }
+                                          else
+                                          {
+                                            REJECT;
                                           }
                                         }
 <RawGString>[^)\n]+                     {
@@ -3096,9 +3131,7 @@ NONLopt [^\n]*
 <RawString>{RAWEND}                     {
                                           *yyextra->pCopyRawString+=yytext;
                                           yyextra->fullArgString+=yytext;
-                                          QCString delimiter = yytext+1;
-                                          delimiter=delimiter.left(delimiter.length()-1);
-                                          if (delimiter==yyextra->delimiter)
+                                          if (extractEndRawStringDelimiter(yytext)==yyextra->delimiter)
                                           {
                                             BEGIN(yyextra->lastRawStringContext);
                                           }
@@ -3438,8 +3471,15 @@ NONLopt [^\n]*
                                            yyextra->pSkipVerbString=yyextra->pCopyRoundGString;
                                            BEGIN(SkipVerbString);
                                         }
-<GCopyRound>[^"'()\n\/,]+               {
+<GCopyRound>[^"'()\n\/,R]+              { // R because of raw string start
                                           *yyextra->pCopyRoundGString << yytext;
+                                        }
+<GCopyRound>{RAWBEGIN}                  {
+                                          *yyextra->pCopyRoundGString << yytext;
+                                          yyextra->delimiter = extractBeginRawStringDelimiter(yytext);
+                                          yyextra->lastRawStringContext = YY_START;
+                                          yyextra->pCopyRawGString = yyextra->pCopyRoundGString;
+                                          BEGIN(RawGString);
                                         }
 <GCopyRound>.                           {
                                           *yyextra->pCopyRoundGString << *yytext;
@@ -4026,8 +4066,16 @@ NONLopt [^\n]*
                                           if (!yyextra->current->name.isEmpty())
                                           {
                                             yyextra->current->fileName   = yyextra->fileName;
-                                            yyextra->current->startLine  = yyextra->yyLineNr;
-                                            yyextra->current->startColumn = yyextra->yyColNr;
+                                            if (yyextra->current_root->section.isEnum() || yyextra->current_root->spec.isEnum())
+                                            {
+                                              yyextra->current->startLine  = yyextra->current->bodyLine;
+                                              yyextra->current->startColumn = yyextra->current->bodyColumn;
+                                            }
+                                            else
+                                            {
+                                              yyextra->current->startLine  = yyextra->yyLineNr;
+                                              yyextra->current->startColumn = yyextra->yyColNr;
+                                            }
                                             if (!yyextra->current_root->spec.isEnum())
                                             {
                                               yyextra->current->type       = "@"; // enum marker
@@ -4060,8 +4108,8 @@ NONLopt [^\n]*
                                           yyextra->lastSquareContext = YY_START;
                                           BEGIN(SkipSquare);
                                         }
-<ReadBody,ReadNSBody,ReadBodyIntf>[^\r\n\#{}"@'/<\\\$]*   { yyextra->current->program << yytext ; }
-<ReadBody,ReadNSBody,ReadBodyIntf>{CPPC}.*                { yyextra->current->program << yytext ; }
+<ReadBody,ReadNSBody,ReadBodyIntf>[^\r\n\#{}"@'/<\\\$R]* { yyextra->current->program << yytext ; } // R because of raw string start
+<ReadBody,ReadNSBody,ReadBodyIntf>{CPPC}.*               { yyextra->current->program << yytext ; }
 <ReadBody,ReadNSBody,ReadBodyIntf>"#".* { if (!yyextra->insidePHP)
                                             REJECT;
                                           // append PHP comment.
@@ -4118,6 +4166,13 @@ NONLopt [^\n]*
                                           {
                                             REJECT;
                                           }
+                                        }
+<ReadBody,ReadNSBody,ReadBodyIntf>{RAWBEGIN} {
+                                            yyextra->current->program << yytext;
+                                            yyextra->delimiter = extractBeginRawStringDelimiter(yytext);
+                                            yyextra->lastRawStringContext = YY_START;
+                                            yyextra->pCopyRawGString = &yyextra->current->program;
+                                            BEGIN(RawGString);
                                         }
 <ReadBody,ReadNSBody,ReadBodyIntf>\"    { yyextra->current->program << yytext ;
                                           yyextra->pCopyQuotedGString = &yyextra->current->program;
@@ -4320,7 +4375,7 @@ NONLopt [^\n]*
                                           BEGIN(MemberSpecSkip);
                                         }
 <TypedefName>";"                        { /* typedef of anonymous type */
-                                          yyextra->current->name.sprintf("@%d",anonCount++);
+                                          yyextra->current->name = generateAnonymousAnchor(yyextra->fileName,yyextra->anonCount++);
                                           if (yyextra->current->section.isEnum() || yyextra->current->spec.isEnum())
                                           {
                                             yyextra->current->program << ','; // add field terminator
@@ -4395,7 +4450,7 @@ NONLopt [^\n]*
                                                 {
                                                   // anonymous compound yyextra->inside -> insert dummy variable name
                                                   //printf("Adding anonymous variable for scope %s\n",qPrint(p->name));
-                                                  yyextra->msName.sprintf("@%d",anonCount++);
+                                                  yyextra->msName = generateAnonymousAnchor(yyextra->fileName,yyextra->anonCount++);
                                                   break;
                                                 }
                                               }
@@ -4736,8 +4791,7 @@ NONLopt [^\n]*
                                           lineCount(yyscanner);
                                         }
 <ReadFuncArgType,CopyArgRound,CopyArgSquare,CopyArgSharp,ReadTempArgs>{RAWBEGIN}      {
-                                          yyextra->delimiter = yytext+2;
-                                          yyextra->delimiter=yyextra->delimiter.left(yyextra->delimiter.length()-1);
+                                          yyextra->delimiter = extractBeginRawStringDelimiter(yytext);
                                           yyextra->lastRawStringContext = YY_START;
                                           yyextra->pCopyRawString = yyextra->copyArgString;
                                           *yyextra->pCopyRawString+=yytext;
@@ -5032,6 +5086,10 @@ NONLopt [^\n]*
                                             yyextra->lastCopyArgStringContext=YY_START;
                                             BEGIN(CopyArgPHPString);
                                           }
+                                        }
+<ReadFuncArgType,ReadTempArgs,CopyArgString,CopyArgPHPString,CopyArgRound,CopyArgSquare,CopyArgSharp>"<="|">="|"<=>" {
+                                          *yyextra->copyArgString+=yytext;
+                                          yyextra->fullArgString+=yytext;
                                         }
 <ReadFuncArgType,ReadTempArgs,CopyArgString,CopyArgPHPString,CopyArgRound,CopyArgSquare,CopyArgSharp>\n  {
                                           lineCount(yyscanner);
@@ -5645,9 +5703,7 @@ NONLopt [^\n]*
                                           }
                                         }
 <SkipCurly,SkipCurlyCpp>{B}*{RAWBEGIN}  {
-                                          QCString raw=QCString(yytext).stripWhiteSpace();
-                                          yyextra->delimiter = raw.mid(2);
-                                          yyextra->delimiter=yyextra->delimiter.left(yyextra->delimiter.length()-1);
+                                          yyextra->delimiter = extractBeginRawStringDelimiter(yytext);
                                           yyextra->lastRawStringContext = YY_START;
                                           yyextra->dummyRawString.clear();
                                           yyextra->pCopyRawString = &yyextra->dummyRawString;
@@ -6305,12 +6361,12 @@ NONLopt [^\n]*
                                               }
                                               else // use invisible name
                                               {
-                                                yyextra->current->name.sprintf("@%d",anonNSCount.load());
+                                                yyextra->current->name = generateAnonymousAnchor(yyextra->fileName,yyextra->anonNSCount);
                                               }
                                             }
                                             else
                                             {
-                                              yyextra->current->name.sprintf("@%d",anonCount++);
+                                              yyextra->current->name = generateAnonymousAnchor(yyextra->fileName,yyextra->anonCount++);
                                             }
                                           }
                                           yyextra->curlyCount=0;
@@ -7514,6 +7570,20 @@ static inline int computeIndent(const char *s,int startIndent)
   return col;
 }
 
+static QCString extractBeginRawStringDelimiter(const char *rawStart)
+{
+  QCString text=rawStart;
+  int i = text.find('"');
+  assert(i!=-1);
+  return text.mid(i+1,text.length()-i-2); // text=...R"xyz( -> delimiter=xyz
+}
+
+static QCString extractEndRawStringDelimiter(const char *rawEnd)
+{
+  QCString text=rawEnd;
+  return text.mid(1,text.length()-2); // text=)xyz" -> delimiter=xyz
+}
+
 static inline void initMethodProtection(yyscan_t yyscanner,Protection prot)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
@@ -7812,7 +7882,6 @@ static void addKnRArgInfo(yyscan_t yyscanner,const QCString &type,const QCString
 
 //-----------------------------------------------------------------------------
 
-
 void fixArgumentListForJavaScript(ArgumentList &al)
 {
   for (Argument &a : al)
@@ -7825,6 +7894,7 @@ void fixArgumentListForJavaScript(ArgumentList &al)
   }
 }
 
+//-----------------------------------------------------------------------------
 
 static void startCommentBlock(yyscan_t yyscanner,bool brief)
 {
@@ -8134,6 +8204,8 @@ static void parseMain(yyscan_t yyscanner,
   yyextra->yyLineNr      = 1 ;
   yyextra->yyBegLineNr   = 1;
   yyextra->yyBegColNr    = 0;
+  yyextra->anonCount     = 0;
+  yyextra->anonNSCount   = 0;
   yyextra->fileName = fileName;
   yyextra->clangParser = clangParser;
   setContext(yyscanner);
@@ -8188,7 +8260,7 @@ static void parseMain(yyscan_t yyscanner,
 
   parseCompounds(yyscanner,rt);
 
-  anonNSCount++;
+  yyextra->anonNSCount++;
 
   // add additional entries that were created during processing
   for (auto &[parent,child]: yyextra->outerScopeEntries)

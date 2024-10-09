@@ -253,6 +253,8 @@ QCString replaceAnonymousScopes(const QCString &s,const QCString &replacement=QC
 
 QCString convertNameToFile(const QCString &name,bool allowDots=FALSE,bool allowUnderscore=FALSE);
 
+QCString generateAnonymousAnchor(const QCString &fileName,int count);
+
 void extractNamespaceName(const QCString &scopeName,
                           QCString &className,QCString &namespaceName,
                           bool allowEmptyClass=FALSE);
@@ -340,7 +342,7 @@ QCString stripExtensionGeneral(const QCString &fName, const QCString &ext);
 
 QCString stripExtension(const QCString &fName);
 
-void replaceNamespaceAliases(QCString &scope,size_t i);
+//void replaceNamespaceAliases(QCString &scope,size_t i);
 
 int computeQualifiedIndex(const QCString &name);
 

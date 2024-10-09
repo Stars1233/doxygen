@@ -51,7 +51,7 @@ class DocParser;
 /* 40 */  DN(DocSimpleSect)     DN_SEP DN(DocSimpleSectSep) DN_SEP DN(DocParamSect)      DN_SEP DN(DocPara)         DN_SEP DN(DocParamList)   DN_SEP   \
 /* 45 */  DN(DocSimpleListItem) DN_SEP DN(DocHtmlListItem)  DN_SEP DN(DocHtmlDescData)   DN_SEP DN(DocHtmlCell)     DN_SEP DN(DocHtmlCaption) DN_SEP   \
 /* 50 */  DN(DocHtmlRow)        DN_SEP DN(DocHtmlTable)     DN_SEP DN(DocHtmlBlockQuote) DN_SEP DN(DocText)         DN_SEP DN(DocRoot)        DN_SEP   \
-/* 55 */  DN(DocHtmlDetails)    DN_SEP DN(DocHtmlSummary)                                                                                              \
+/* 55 */  DN(DocHtmlDetails)    DN_SEP DN(DocHtmlSummary)   DN_SEP DN(DocPlantUmlFile)                                                                      \
 
 // forward declarations
 #define DN(x) class x;
@@ -416,14 +416,15 @@ class DocInclude : public DocNode
   public:
   enum Type { Include, DontInclude, VerbInclude, HtmlInclude, LatexInclude,
 	      IncWithLines, Snippet , SnippetWithLines,
-	      DontIncWithLines, RtfInclude, ManInclude, DocbookInclude, XmlInclude,
-              SnippetTrimLeft};
+	      DontIncWithLines, RtfInclude, ManInclude, DocbookInclude, XmlInclude
+            };
     DocInclude(DocParser *parser,DocNodeVariant *parent,const QCString &file,
-               const QCString &context, Type t,
+               const QCString &context, Type t, bool stripCodeComments,
                bool isExample,const QCString &exampleFile,
-               const QCString &blockId, bool isBlock)
+               const QCString &blockId, bool isBlock, bool trimLeft)
     : DocNode(parser,parent), m_file(file), m_context(context), m_type(t),
-      m_isExample(isExample), m_isBlock(isBlock),
+      m_stripCodeComments(stripCodeComments),
+      m_isExample(isExample), m_isBlock(isBlock), m_trimLeft(trimLeft),
       m_exampleFile(exampleFile), m_blockId(blockId) {}
     QCString file() const        { return m_file; }
     QCString extension() const   { int i=m_file.findRev('.'); return i!=-1 ? m_file.mid(i) : QCString(); }
@@ -431,9 +432,11 @@ class DocInclude : public DocNode
     QCString text() const        { return m_text; }
     QCString context() const     { return m_context; }
     QCString blockId() const     { return m_blockId; }
+    bool stripCodeComments() const { return m_stripCodeComments; }
     bool isExample() const       { return m_isExample; }
     QCString exampleFile() const { return m_exampleFile; }
     bool isBlock() const         { return m_isBlock; }
+    bool trimLeft() const        { return m_trimLeft; }
     void parse();
 
   private:
@@ -441,8 +444,10 @@ class DocInclude : public DocNode
     QCString  m_context;
     QCString  m_text;
     Type      m_type;
+    bool      m_stripCodeComments;
     bool      m_isExample;
     bool      m_isBlock;
+    bool      m_trimLeft;
     QCString  m_exampleFile;
     QCString  m_blockId;
 };
@@ -453,9 +458,9 @@ class DocIncOperator : public DocNode
   public:
     enum Type { Line, SkipLine, Skip, Until };
     DocIncOperator(DocParser *parser,DocNodeVariant *parent,Type t,const QCString &pat,
-                   const QCString &context,bool isExample,const QCString &exampleFile)
+                   const QCString &context,bool stripCodeComments,bool isExample,const QCString &exampleFile)
     : DocNode(parser,parent), m_type(t), m_pattern(pat), m_context(context),
-      m_isFirst(FALSE), m_isLast(FALSE),
+      m_isFirst(FALSE), m_isLast(FALSE), m_stripCodeComments(stripCodeComments),
       m_isExample(isExample), m_exampleFile(exampleFile) {}
     Type type() const           { return m_type; }
     const char *typeAsString() const
@@ -478,6 +483,7 @@ class DocIncOperator : public DocNode
     bool isLast() const          { return m_isLast; }
     void markFirst(bool v=TRUE)  { m_isFirst = v; }
     void markLast(bool v=TRUE)   { m_isLast = v; }
+    bool stripCodeComments() const { return m_stripCodeComments; }
     bool isExample() const       { return m_isExample; }
     QCString exampleFile() const { return m_exampleFile; }
     QCString includeFileName() const { return m_includeFileName; }
@@ -492,6 +498,7 @@ class DocIncOperator : public DocNode
     QCString  m_context;
     bool     m_isFirst = false;
     bool     m_isLast = false;
+    bool     m_stripCodeComments = true;
     bool     m_isExample = false;
     QCString  m_exampleFile;
     QCString m_includeFileName;
@@ -703,6 +710,15 @@ class DocDiaFile : public DocDiagramFileBase
 {
   public:
     DocDiaFile(DocParser *parser,DocNodeVariant *parent,const QCString &name,const QCString &context,
+               const QCString &srcFile,int srcLine);
+    bool parse();
+};
+
+/** Node representing a uml file */
+class DocPlantUmlFile : public DocDiagramFileBase
+{
+  public:
+    DocPlantUmlFile(DocParser *parser,DocNodeVariant *parent,const QCString &name,const QCString &context,
                const QCString &srcFile,int srcLine);
     bool parse();
 };

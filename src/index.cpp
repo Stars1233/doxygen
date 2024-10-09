@@ -186,7 +186,7 @@ static void MemberIndexMap_add(Index::MemberIndexMap &map,const std::string &let
   }
   else
   {
-    map.insert(std::make_pair(letter,std::vector<const MemberDef*>({md})));
+    map.emplace(letter,std::vector<const MemberDef*>({md}));
   }
 }
 
@@ -461,16 +461,22 @@ static void writeMemberToIndex(const Definition *def,const MemberDef *md,bool ad
   bool hideUndocMembers = Config_getBool(HIDE_UNDOC_MEMBERS);
   const MemberVector &enumList = md->enumFieldList();
   bool isDir = !enumList.empty() && md->isEnumerate();
-  QCString name = def->definitionType()==Definition::TypeModule ? md->qualifiedName() : md->name();
-  if (md->getOuterScope()==def || md->getOuterScope()==Doxygen::globalScope)
+  auto defType = def->definitionType();
+  bool namespaceMemberInFileDocs = md->getNamespaceDef() && defType==Definition::TypeFile;
+  bool lAddToIndex = addToIndex && !namespaceMemberInFileDocs;
+  QCString name = namespaceMemberInFileDocs || defType==Definition::TypeModule ?
+                  md->qualifiedName() : md->name();
+  if (md->getOuterScope()==def ||
+      (md->getNamespaceDef()!=nullptr && defType==Definition::TypeFile) ||
+      md->getOuterScope()==Doxygen::globalScope)
   {
     Doxygen::indexList->addContentsItem(isDir,
-        name,md->getReference(),md->getOutputFileBase(),md->anchor(),FALSE,addToIndex && md->getGroupDef()==nullptr);
+        name,md->getReference(),md->getOutputFileBase(),md->anchor(),FALSE,lAddToIndex && md->getGroupDef()==nullptr);
   }
   else // inherited member
   {
     Doxygen::indexList->addContentsItem(isDir,
-        name,def->getReference(),def->getOutputFileBase(),md->anchor(),FALSE,addToIndex && md->getGroupDef()==nullptr);
+        name,def->getReference(),def->getOutputFileBase(),md->anchor(),FALSE,lAddToIndex && md->getGroupDef()==nullptr);
   }
   if (isDir)
   {
@@ -482,15 +488,21 @@ static void writeMemberToIndex(const Definition *def,const MemberDef *md,bool ad
     {
       if (!hideUndocMembers || emd->hasDocumentation())
       {
-        if (emd->getOuterScope()==def || emd->getOuterScope()==Doxygen::globalScope)
+        namespaceMemberInFileDocs = emd->getNamespaceDef() && defType==Definition::TypeFile;
+        lAddToIndex = addToIndex && !namespaceMemberInFileDocs;
+        QCString ename = namespaceMemberInFileDocs || defType==Definition::TypeModule ?
+                         emd->qualifiedName() : emd->name();
+        if (emd->getOuterScope()==def ||
+            (emd->getNamespaceDef()!=nullptr && defType==Definition::TypeFile) ||
+            emd->getOuterScope()==Doxygen::globalScope)
         {
           Doxygen::indexList->addContentsItem(FALSE,
-              emd->name(),emd->getReference(),emd->getOutputFileBase(),emd->anchor(),FALSE,addToIndex && emd->getGroupDef()==nullptr);
+              ename,emd->getReference(),emd->getOutputFileBase(),emd->anchor(),FALSE,lAddToIndex && emd->getGroupDef()==nullptr);
         }
         else // inherited member
         {
           Doxygen::indexList->addContentsItem(FALSE,
-              emd->name(),def->getReference(),def->getOutputFileBase(),emd->anchor(),FALSE,addToIndex && emd->getGroupDef()==nullptr);
+              ename,def->getReference(),def->getOutputFileBase(),emd->anchor(),FALSE,lAddToIndex && emd->getGroupDef()==nullptr);
         }
       }
     }
@@ -988,8 +1000,8 @@ static void writeClassTreeForList(OutputList &ol,const ClassLinkedMap &cl,bool &
         //printf("list: Has children %s: %d\n",qPrint(cd->name()),hasChildren);
         if (cd->isLinkable())
         {
-          //printf("Writing class %s isLinkable()=%d isLinkableInProject()=%d cd->templateMaster()=%p\n",
-          //    qPrint(cd->displayName()),cd->isLinkable(),cd->isLinkableInProject(),cd->templateMaster());
+          //printf("Writing class %s isLinkable()=%d isLinkableInProject()=%d cd->isImplicitTemplateinstance()=%d\n",
+          //    qPrint(cd->displayName()),cd->isLinkable(),cd->isLinkableInProject(),cd->isImplicitTemplateInstance());
           ol.startIndexItem(cd->getReference(),cd->getOutputFileBase());
           ol.parseText(cd->displayName());
           ol.endIndexItem(cd->getReference(),cd->getOutputFileBase());
@@ -1580,7 +1592,7 @@ static void writeFileIndex(OutputList &ol)
         }
         else // new path -> create path entry + append
         {
-          pathMap.insert(std::make_pair(path.str(),outputFiles.size()));
+          pathMap.emplace(path.str(),outputFiles.size());
           outputFiles.emplace_back(path);
           outputFiles.back().files.push_back(fd.get());
         }
@@ -1704,12 +1716,12 @@ static void writeClassTree(const ListType &cl,FTVHelp *ftv,bool addToIndex,bool 
       int count=0;
       for (const auto &ccd : cd->getClasses())
       {
-        if (ccd->isLinkableInProject() && ccd->templateMaster()==nullptr)
+        if (ccd->isLinkableInProject() && !ccd->isImplicitTemplateInstance())
         {
           count++;
         }
       }
-      if (classVisibleInIndex(cd) && cd->templateMaster()==nullptr)
+      if (classVisibleInIndex(cd) && !cd->isImplicitTemplateInstance())
       {
         if (ftv)
         {
@@ -2089,7 +2101,7 @@ static int countAnnotatedClasses(int *cp, ClassDef::CompoundType ct)
     {
       continue;
     }
-    if (cd->isLinkableInProject() && cd->templateMaster()==nullptr)
+    if (cd->isLinkableInProject() && !cd->isImplicitTemplateInstance())
     {
       if (!cd->isEmbeddedInOuterScope())
       {
@@ -2138,7 +2150,7 @@ static void writeAnnotatedClassList(OutputList &ol,ClassDef::CompoundType ct)
       ol.disable(OutputType::Docbook);
       ol.disable(OutputType::RTF);
     }
-    if (cd->isLinkableInProject() && cd->templateMaster()==nullptr)
+    if (cd->isLinkableInProject() && !cd->isImplicitTemplateInstance())
     {
       ol.startIndexKey();
       if (cd->getLanguage()==SrcLangExt::VHDL)
@@ -2243,7 +2255,7 @@ static void writeAlphabeticalClassList(OutputList &ol, ClassDef::CompoundType ct
   {
     if (sliceOpt && cd->compoundType() != ct)
       continue;
-    if (cd->isLinkableInProject() && cd->templateMaster()==nullptr)
+    if (cd->isLinkableInProject() && !cd->isImplicitTemplateInstance())
     {
       if (cd->getLanguage()==SrcLangExt::VHDL && !(VhdlDocGen::convert(cd->protection())==VhdlDocGen::ENTITYCLASS ))// no architecture
         continue;
@@ -2285,7 +2297,7 @@ static void writeAlphabeticalClassList(OutputList &ol, ClassDef::CompoundType ct
     if (cd->getLanguage()==SrcLangExt::VHDL && !(VhdlDocGen::convert(cd->protection())==VhdlDocGen::ENTITYCLASS ))// no architecture
       continue;
 
-    if (cd->isLinkableInProject() && cd->templateMaster()==nullptr)
+    if (cd->isLinkableInProject() && !cd->isImplicitTemplateInstance())
     {
       QCString className = cd->className();
       int index = getPrefixIndex(className);
@@ -2300,8 +2312,7 @@ static void writeAlphabeticalClassList(OutputList &ol, ClassDef::CompoundType ct
         }
         else // new entry
         {
-          classesByLetter.insert(
-              std::make_pair(letter, std::vector<const ClassDef*>({ cd.get() })));
+          classesByLetter.emplace(letter, std::vector<const ClassDef*>({ cd.get() }));
         }
       }
     }
@@ -2830,7 +2841,7 @@ void Index::addClassMemberNameToIndex(const MemberDef *md)
   if (md->isLinkableInProject() &&
       (cd=md->getClassDef())    &&
       cd->isLinkableInProject() &&
-      cd->templateMaster()==nullptr)
+      !cd->isImplicitTemplateInstance())
   {
     QCString n = md->name();
     std::string letter = getUTF8CharAt(n.str(),getPrefixIndex(n));
